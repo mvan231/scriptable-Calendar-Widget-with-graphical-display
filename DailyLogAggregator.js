@@ -296,7 +296,7 @@ function createWidget(data) {
     completionData.push({
       value: `[${completionRate}%]`, 
       align: 'right',
-      color: completionCount === data.fields.length ? '#66ff00' : '',
+      color: completionCount === data.fields.length ? '#66ff00' : '#ffffff',
     });
   });
 
@@ -329,7 +329,7 @@ function addTextToStack(stack, data) {
   textLine.font = new Font(`Menlo${isBold ? '-Bold' : ''}`, TEXT_SIZE);
 
   if (color) {
-    textLine.color = new Color(color);
+    textLine.textColor = new Color(color);
   }
 
   if (align === 'center') {

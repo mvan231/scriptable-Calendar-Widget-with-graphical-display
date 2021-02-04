@@ -6,7 +6,7 @@
  * CONSTANTS
  ============================================================================*/
 
-Date.prototype.addHours = function (numHours) {
+ Date.prototype.addHours = function (numHours) {
   const date = new Date(this.valueOf());
   date.setHours(date.getHours() + numHours);
   return date;
@@ -39,11 +39,23 @@ const DAY_OF_MONTH_FORMAT = new Intl.DateTimeFormat('en-US', {
 
 
 /**
- * Widget confugurations. Edit these to customize widget.
+ * Widget confugurations. Edit these to customize the widget.
  */
 const WIDGET_CONFIGURATIONS = {
   // Number of hours to show in the agenda
   numHours: 6,
+
+  // Calendars to show events from. Empty array means all calendars.
+  // Calendar names can be found in the "Calendar" App. The name must be an exact string match.
+  calendars: [],
+
+  // Calendar callback app
+  // When clicking on the widget, which calendar app should open?
+  // Must be one of the supported apps:
+  //   - calshow - Default iOS Calendar
+  //   - googlecalendar - Google Calendar
+  //   - x-fantastical3 - Fantastical
+  callbackCalendarApp: 'calshow', 
 
   // Whether or not to use a background image for the widget
   useBackgroundImage: true,
@@ -93,12 +105,12 @@ const WIDGET_CONFIGURATIONS = {
   // Thickness of hour/now line
   lineHeight: 4,
 
-  // Color of hour/mp line
+  // Color of hour/half-hour line
   lineColor: new Color('#ffffff', 0.3),
 };
 
 /*=============================================================================
- * WIDGET SET UP
+ * WIDGET SET UP / PRESENTATION
  ============================================================================*/
 const widget = new ListWidget();
 
@@ -109,9 +121,21 @@ console.log(JSON.stringify(events));
 
 drawWidget(widget, events, WIDGET_CONFIGURATIONS);
 
-Script.setWidget(widget);
-widget.presentMedium();
-Script.complete();
+console.log(`args.widgetParameter: ${JSON.stringify(args.widgetParameter)}`);
+
+if (config.runsInWidget) {
+  Script.setWidget(widget);
+  Script.complete();
+} else if (args.widgetParameter === 'callback') {
+  const timestamp = (new Date().getTime() - new Date('2001/01/01').getTime()) / 1000;
+  const callback = new CallbackURL(`${WIDGET_CONFIGURATIONS.callbackCalendarApp}:${timestamp}`);
+  callback.open();
+  Script.complete();
+} else {
+  Script.setWidget(widget);
+  widget.presentMedium();
+  Script.complete();
+}
 
 /*=============================================================================
  * DRAW WIDGET
@@ -120,7 +144,7 @@ Script.complete();
 function drawWidget(widget, events, WIDGET_CONFIGURATIONS) {
   const mainStack = widget.addStack();
   mainStack.layoutHorizontally();
-  mainStack.spacing = 20;
+  mainStack.spacing = 30;
 
   // Left stack contains date, and all day events
   const leftStack = mainStack.addStack();
@@ -186,7 +210,7 @@ function drawLeftStack(stack, events, {
       stack.addSpacer(smallSpacer);
     }
   } else {
-    const noAllDayEventsText = dateStack.addText('No all-day events');
+    const noAllDayEventsText = stack.addText('No all-day events');
     noAllDayEventsText.textColor = defaultTextColor;
     noAllDayEventsText.font = new Font(fontBold, defaultTextSize);
   }
@@ -313,7 +337,8 @@ async function setBackground(widget, { useBackgroundImage, backgroundColor }) {
     const exists = files.fileExists(path);
 
     // If it exists and we're running in the widget, use photo from cache
-    if (exists && config.runsInWidget) {
+    // Or we're invoking the script to run FROM the widget with a widgetParameter
+    if (exists && config.runsInWidget || args.widgetParameter === 'callback') {
       widget.backgroundImage = files.readImage(path);
 
       // If it's missing when running in the widget, fallback to backgroundColor
@@ -337,7 +362,7 @@ async function setBackground(widget, { useBackgroundImage, backgroundColor }) {
   }
 }
 
-async function getEvents({ numHours }) {
+async function getEvents({ numHours, calendars }) {
   const todayEvents = await CalendarEvent.today([]);
   const tomorrowEvents = await CalendarEvent.tomorrow([]);
   const combinedEvents = todayEvents.concat(tomorrowEvents);
@@ -352,9 +377,11 @@ async function getEvents({ numHours }) {
     const start = new Date(event.startDate);
     const end = new Date(event.endDate);
 
-    // Filter out events that start between now and numHours from now
-    if (start <= inNumHours) {
-      if (event.isAllDay) {
+    // Filter for events that:
+    //   - start between now and numHours from now
+    //   - are in the specified array of calendars (if any)
+    if (start <= inNumHours && end > now && (calendars.length === 0 || calendars.includes(event.calendar.title))) {
+      if (event.isAllDay) { // All-day events
         if (!eventsByHour['all-day']) {
           eventsByHour['all-day'] = [];
         }
@@ -362,7 +389,7 @@ async function getEvents({ numHours }) {
           title: event.title,
           color: `#${event.calendar.color.hex}`,
         });
-      } else if (start < now && end > now) {
+      } else if (start < now && end > now) { // Events that started before the current hour, but have not yet ended
         const hourKey = HOUR_FORMAT.format(now);
 
         if (!eventsByHour[hourKey]) {
@@ -381,7 +408,7 @@ async function getEvents({ numHours }) {
         };
 
         eventsByHour[hourKey].push(eventObj);
-      } else {
+      } else { // Events that start between now and inNumHours
         const hourKey = HOUR_FORMAT.format(start);
 
         if (!eventsByHour[hourKey]) {
